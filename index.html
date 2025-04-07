@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>作業追蹤器</title>
+  <style>
+    body {
+      font-family: "微軟正黑體", sans-serif;
+      background-color: #fffaf2;
+      padding: 20px;
+    }
+    textarea, input[type=text] {
+      width: 100%;
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+    .columns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+    .column {
+      flex: 1 1 30%;
+      min-width: 250px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    th, td {
+      border: 2px solid #000;
+      text-align: center;
+      padding: 8px;
+    }
+    td.status {
+      cursor: pointer;
+      font-size: 20px;
+    }
+    .student-name {
+      font-weight: bold;
+      color: #000;
+    }
+    .btn {
+      font-weight: bold;
+      font-family: '微軟正黑體', sans-serif;
+      padding: 8px 16px;
+      background-color: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-right: 10px;
+    }
+    .btn:hover {
+      background-color: #357abd;
+    }
+    .table-wrapper:nth-child(3n+1) table { background-color: #fde2e2; }
+    .table-wrapper:nth-child(3n+2) table { background-color: #e2f0cb; }
+    .table-wrapper:nth-child(3n+3) table { background-color: #d2e3fc; }
+  </style>
+</head>
+<body>
+  <h2>📘 作業追蹤器</h2>
+  <label>學生名單（每行一位）：</label>
+  <textarea id="students" rows="9" placeholder="請輸入學生名單...\n例如：\n王小明\n李小華"></textarea>
+
+  <label>功課項目（每行一項）：</label>
+  <textarea id="assignments" rows="4" placeholder="請輸入功課項目...\n例如：\n聯絡簿\n國語 2-3"></textarea>
+
+  <button class="btn" style="background-color: #4CAF50;" onclick="generateTable(true)">📋 產生表格</button>
+  <button class="btn" style="background-color: #e53935;" onclick="toggleCompletedVisibility()">🔍 切換：只顯示尚未完成</button>
+  <button class="btn" style="background-color: #6c757d;" onclick="location.reload()">🔄 重新整理頁面</button>
+
+  <div class="columns" id="table-container"></div>
+
+  <script>
+    window.onload = function () {
+      const savedStudents = localStorage.getItem('studentList');
+      if (savedStudents) {
+        document.getElementById('students').value = savedStudents;
+      }
+    };
+
+    let globalStudentRows = [];
+
+    function generateTable(forceClear = false) {
+      const currentList = document.getElementById("students").value.trim();
+      localStorage.setItem("studentList", currentList);
+      const studentLines = currentList.split("\n");
+      const assignmentLines = document.getElementById("assignments").value.trim().split("\n");
+      const container = document.getElementById("table-container");
+      container.innerHTML = "";
+      globalStudentRows = [];
+      const studentsPerColumn = 9;
+      const totalColumns = Math.ceil(studentLines.length / studentsPerColumn);
+      for (let col = 0; col < totalColumns; col++) {
+        const columnDiv = document.createElement("div");
+        columnDiv.className = "column table-wrapper";
+        let html = '<table><tr><th>學生\\功課</th>';
+        assignmentLines.forEach(hw => {
+          html += `<th>${hw}</th>`;
+        });
+        html += '</tr>';
+        for (let row = col * studentsPerColumn; row < Math.min((col + 1) * studentsPerColumn, studentLines.length); row++) {
+          const student = studentLines[row];
+          const trId = `row-${row}`;
+          html += `<tr id="${trId}"><td class="student-name">${student}</td>`;
+          assignmentLines.forEach((_, j) => {
+            const cellId = `cell-${row}-${j}`;
+            const saved = forceClear ? null : localStorage.getItem(cellId);
+            const mark = saved === '❌' ? '❌' : '✅';
+            html += `<td class="status" id="${cellId}" onclick="toggleStatus('${cellId}')">${mark}</td>`;
+          });
+          html += '</tr>';
+          globalStudentRows.push(trId);
+        }
+        html += '</table>';
+        columnDiv.innerHTML = html;
+        container.appendChild(columnDiv);
+      }
+    }
+
+    function toggleStatus(id) {
+      const cell = document.getElementById(id);
+      const newStatus = cell.textContent === '✅' ? '❌' : '✅';
+      cell.textContent = newStatus;
+      localStorage.setItem(id, newStatus);
+    }
+
+    function toggleCompletedVisibility() {
+      globalStudentRows.forEach(rowId => {
+        const row = document.getElementById(rowId);
+        const cells = row.querySelectorAll("td.status");
+        const allChecked = Array.from(cells).every(cell => cell.textContent === '✅');
+        row.style.display = allChecked ? 'none' : '';
+      });
+    }
+  </script>
+</body>
+</html>
