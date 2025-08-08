@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <title>作業追蹤器</title>
+  <style>
+    body {
+      font-family: "微軟正黑體", sans-serif;
+      background-color: #fffaf2;
+      padding: 20px;
+    }
+    textarea, input[type=text] {
+      width: 100%;
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+    .columns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+    .column {
+      flex: 1 1 30%;
+      min-width: 250px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    th, td {
+      border: 2px solid #000;
+      text-align: center;
+      padding: 8px;
+    }
+    th.subject-header {
+      cursor: pointer;
+      user-select: none;
+    }
+    th.subject-header:hover {
+      background-color: rgba(0,0,0,0.06);
+    }
+    td.status {
+      cursor: pointer;
+      font-size: 20px;
+      user-select: none;
+    }
+    .student-name {
+      font-weight: bold;
+      color: #000;
+      white-space: nowrap;
+    }
+    .btn {
+      font-weight: bold;
+      font-family: '微軟正黑體', sans-serif;
+      padding: 8px 16px;
+      background-color: #4a90e2;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+    .btn:hover { background-color: #357abd; }
+    .table-wrapper:nth-child(3n+1) table { background-color: #fde2e2; }
+    .table-wrapper:nth-child(3n+2) table { background-color: #e2f0cb; }
+    .table-wrapper:nth-child(3n+3) table { background-color: #d2e3fc; }
+  </style>
+
+  <!-- SheetJS for Excel export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h2>📘 作業追蹤器</h2>
+
+  <label>學生名單（每行一位）：</label>
+  <textarea id="students" rows="9" placeholder="請輸入學生名單...
+例如：
+王小明
+李小華"></textarea>
+
+  <label>功課項目（每行一項）：</label>
+  <textarea id="assignments" rows="4" placeholder="請輸入功課項目...
+例如：
+聯絡簿
+國語 2-3"></textarea>
+
+  <!-- 按鈕列（已移除「一鍵全勾/全叉（目前表格）」） -->
+  <button class="btn" style="background-color:#4CAF50;" onclick="generateTable(true, '✅')">📋 產生表格（全勾）</button>
+  <button class="btn" style="background-color:#8d6e63;" onclick="generateTable(true, '❌')">📋 產生表格（全叉）</button>
+  <button class="btn" style="background-color:#e53935;" onclick="toggleCompletedVisibility()">🔍 切換：只顯示尚未完成</button>
+  <button class="btn" style="background-color:#6c757d;" onclick="location.reload()">🔄 重新整理頁面</button>
+  <button class="btn" id="btnExport" style="background-color:#1976d2;">⬇️ 匯出（JSON）</button>
+  <button class="btn" id="btnExportExcel" style="background-color:#0288d1;">⬇️ 匯出（Excel）</button>
+  <label class="btn" for="fileImport" style="background-color:#455a64; display:inline-flex; align-items:center; gap:.5rem;">
+    ⬆️ 匯入（JSON）
+  </label>
+  <input id="fileImport" type="file" accept=".json" style="display:none;">
+
+  <div class="columns" id="table-container"></div>
+
+  <script>
+    // 啟動：載回上次輸入
+    window.onload = function () {
+      const savedStudents = localStorage.getItem('studentList');
+      const savedAssignments = localStorage.getItem('assignmentList');
+      if (savedStudents)   document.getElementById('students').value   = savedStudents;
+      if (savedAssignments)document.getElementById('assignments').value= savedAssignments;
+    };
+
+    let globalStudentRows = [];   // 每列的 tr id（切換顯示用）
+    let hideCompleted = false;    // 只顯示尚未完成 開關
+
+    /**
+     * 產生表格
+     * @param {boolean} forceClear - true：忽略每格舊狀態，全部用 defaultMark
+     * @param {'✅'|'❌'} defaultMark - 預設要放的符號（全勾或全叉）
+     */
+    function generateTable(forceClear = false, defaultMark = '✅') {
+      // 存 textarea 內容
+      const currentStudents   = document.getElementById("students").value.trim();
+      const currentAssignments= document.getElementById("assignments").value.trim();
+      localStorage.setItem("studentList", currentStudents);
+      localStorage.setItem("assignmentList", currentAssignments);
+
+      const studentLines    = currentStudents.split("\n").map(s => s.trim()).filter(Boolean);
+      const assignmentLines = currentAssignments.split("\n").map(s => s.trim()).filter(Boolean);
+
+      const container = document.getElementById("table-container");
+      container.innerHTML = "";
+      globalStudentRows = [];
+      hideCompleted = false; // 重新產生時關閉過濾
+
+      const studentsPerColumn = 9;
+      const totalColumns = Math.ceil(studentLines.length / studentsPerColumn);
+
+      for (let col = 0; col < totalColumns; col++) {
+        const tableId = `table-${col}`;
+        const columnDiv = document.createElement("div");
+        columnDiv.className = "column table-wrapper";
+        let html = `<table id="${tableId}"><thead><tr><th>學生\\功課</th>`;
+        assignmentLines.forEach((hw, j) => {
+          html += `<th class="subject-header" onclick="toggleColumnStatus('${tableId}', ${j})" title="點我切換整欄">${hw}</th>`;
+        });
+        html += '</tr></thead><tbody>';
+
+        for (let row = col * studentsPerColumn; row < Math.min((col + 1) * studentsPerColumn, studentLines.length); row++) {
+          const student = studentLines[row];
+          const trId = `row-${row}`;
+          html += `<tr id="${trId}"><td class="student-name">${student}</td>`;
+          assignmentLines.forEach((_, j) => {
+            const cellId = `cell-${row}-${j}`;
+            const saved = forceClear ? null : localStorage.getItem(cellId);
+            const mark  = (saved === '✅' || saved === '❌') ? saved : defaultMark;
+            html += `<td class="status" id="${cellId}" onclick="toggleStatus('${cellId}')">${mark}</td>`;
+            if (forceClear) localStorage.setItem(cellId, mark); // 新表格時寫入預設值
+          });
+          html += '</tr>';
+          globalStudentRows.push(trId);
+        }
+
+        html += '</tbody></table>';
+        columnDiv.innerHTML = html;
+        container.appendChild(columnDiv);
+      }
+    }
+
+    // 點單格切換狀態
+    function toggleStatus(id) {
+      const cell = document.getElementById(id);
+      const newStatus = cell.textContent === '✅' ? '❌' : '✅';
+      cell.textContent = newStatus;
+      localStorage.setItem(id, newStatus);
+
+      // 若只顯示尚未完成開著，點完後即時更新該列是否隱藏
+      if (hideCompleted) {
+        const row = cell.closest('tr');
+        const cells = row.querySelectorAll("td.status");
+        const allChecked = Array.from(cells).every(c => c.textContent === '✅');
+        row.style.display = allChecked ? 'none' : '';
+      }
+    }
+
+    // 點科目名稱切換整欄（在單一表格範圍內）
+    function toggleColumnStatus(tableId, subjIndex) {
+      // subjIndex 從 0 開始；在 td:nth-child() 需 +2（含學生姓名欄）
+      const table = document.getElementById(tableId);
+      if (!table) return;
+      const targetNth = subjIndex + 2;
+      const tds = Array.from(table.querySelectorAll(`tbody tr td:nth-child(${targetNth})`))
+                        .filter(td => td.classList.contains('status'));
+
+      if (!tds.length) return;
+      // 如果這一欄「全部都是✅」，就改成❌；否則改成✅
+      const allChecked = tds.every(td => td.textContent === '✅');
+      const newStatus = allChecked ? '❌' : '✅';
+      tds.forEach(td => {
+        if (td.textContent !== newStatus) {
+          td.textContent = newStatus;
+          localStorage.setItem(td.id, newStatus);
+        }
+      });
+
+      // 若只顯示尚未完成開著，更新每列顯示
+      if (hideCompleted) {
+        tds.forEach(td => {
+          const row = td.closest('tr');
+          const cells = row.querySelectorAll('td.status');
+          const rowAllChecked = Array.from(cells).every(c => c.textContent === '✅');
+          row.style.display = rowAllChecked ? 'none' : '';
+        });
+      }
+    }
+
+    // 只顯示尚未完成：全✅的列隱藏，再按一次恢復
+    function toggleCompletedVisibility() {
+      hideCompleted = !hideCompleted;
+      globalStudentRows.forEach(rowId => {
+        const row = document.getElementById(rowId);
+        if (!row) return;
+        const cells = row.querySelectorAll("td.status");
+        const allChecked = Array.from(cells).every(cell => cell.textContent === '✅');
+        row.style.display = (hideCompleted && allChecked) ? 'none' : '';
+      });
+    }
+
+    // 匯出 JSON
+    document.getElementById('btnExport').addEventListener('click', () => {
+      const snap = snapshot();
+      if (!snap) { alert('請先產生表格。'); return; }
+      const blob = new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+      a.href = URL.createObjectURL(blob);
+      a.download = `作業追蹤-${ts}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    // 匯出 Excel
+    document.getElementById('btnExportExcel').addEventListener('click', () => {
+      const snap = snapshot();
+      if (!snap) { alert('請先產生表格。'); return; }
+
+      // 二維陣列：第一列標題，後面每列是學生
+      const sheetData = [];
+      sheetData.push(['學生\\功課', ...snap.assignments]);
+      snap.students.forEach(stu => {
+        const row = [stu];
+        snap.assignments.forEach(sub => {
+          row.push(snap.records[stu][sub]);
+        });
+        sheetData.push(row);
+      });
+
+      const ws = XLSX.utils.aoa_to_sheet(sheetData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, '作業追蹤');
+      const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g,'-');
+      XLSX.writeFile(wb, `作業追蹤-${ts}.xlsx`);
+    });
+
+    // 匯入 JSON
+    document.getElementById('fileImport').addEventListener('change', (e) => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          const data = JSON.parse(r.result);
+          if (!data || !Array.isArray(data.students) || !Array.isArray(data.assignments) || typeof data.records !== 'object') {
+            alert('匯入失敗：檔案格式不正確'); return;
+          }
+          // 放回 textarea + 保存
+          document.getElementById('students').value    = data.students.join('\n');
+          document.getElementById('assignments').value = data.assignments.join('\n');
+          localStorage.setItem('studentList', document.getElementById('students').value.trim());
+          localStorage.setItem('assignmentList', document.getElementById('assignments').value.trim());
+
+          // 以「全叉」重建表格，避免舊格殘留
+          generateTable(true, '❌');
+
+          // 逐格套用正確狀態
+          data.students.forEach((stu, i) => {
+            data.assignments.forEach((sub, j) => {
+              const want = (data.records?.[stu]?.[sub] === '✅' || data.records?.[stu]?.[sub] === true) ? '✅' : '❌';
+              const id = `cell-${i}-${j}`;
+              const cell = document.getElementById(id);
+              if (cell && cell.textContent !== want) {
+                cell.textContent = want;
+              }
+              localStorage.setItem(id, want);
+            });
+          });
+          alert('匯入完成！');
+          e.target.value = ''; // 清空選檔
+        } catch (err) {
+          alert('匯入失敗：無法解析檔案');
+        }
+      };
+      r.readAsText(f, 'utf-8');
+    });
+
+    // 擷取當前畫面為 JSON
+    function snapshot() {
+      const students    = document.getElementById('students').value.split('\n').map(s=>s.trim()).filter(Boolean);
+      const assignments = document.getElementById('assignments').value.split('\n').map(s=>s.trim()).filter(Boolean);
+      if (!students.length || !assignments.length) return null;
+
+      const records = {};
+      students.forEach((stu, i) => {
+        records[stu] = {};
+        assignments.forEach((sub, j) => {
+          const id = `cell-${i}-${j}`;
+          const cell = document.getElementById(id);
+          const v = cell ? cell.textContent.trim() : '❌';
+          records[stu][sub] = (v === '✅') ? '✅' : '❌';
+        });
+      });
+
+      return { students, assignments, records };
+    }
+  </script>
+</body>
+</html>
